@@ -1,10 +1,13 @@
 FROM rust:1.48 AS librespot
 
-RUN apt-get update \
- && apt-get -y install build-essential portaudio19-dev curl unzip \
- && apt-get clean && rm -fR /var/lib/apt/lists
+RUN apt-get update && \
+    apt-get -y --no-install-recommends install \
+        build-essential \
+        curl \
+        portaudio19-dev \
+        unzip && \
+    apt-get clean && rm -fR /var/lib/apt/lists
 
-ARG ARCH=amd64
 ARG LIBRESPOT_VERSION=0.2.0
 
 COPY ./install-librespot.sh /tmp/
@@ -12,9 +15,22 @@ RUN /tmp/install-librespot.sh
 
 FROM ubuntu:bionic AS snapcast
 
-RUN apt-get update \
- && apt-get -y install build-essential curl git libasound2-dev libboost-dev libopus-dev libvorbisidec-dev libvorbis-dev libflac-dev alsa-utils libavahi-client-dev avahi-daemon libsoxr-dev \
- && apt-get clean && rm -fR /var/lib/apt/lists
+RUN apt-get update && \
+    apt-get -y install \
+        build-essential \
+        curl \
+        git \
+        libasound2-dev \
+        libboost-dev \
+        libopus-dev \
+        libvorbisidec-dev \
+        libvorbis-dev \
+        libflac-dev \
+        alsa-utils \
+        libavahi-client-dev \
+        avahi-daemon \
+        libsoxr-dev && \
+    apt-get clean && rm -fR /var/lib/apt/lists
 
 ARG SNAPCAST_VERSION=0.25.0
 ARG BOOST_VERSION=1.76.0
@@ -27,23 +43,62 @@ RUN cd /tmp \
  && cd snapcast \
  && git submodule update --init --recursive \
  && ADD_CFLAGS="-I/tmp/boost_${BOOST_VERSION_UNDERSCORED}" make -C server \
- && cp server/snapserver /usr/local/bin/ \
- && cp server/etc/snapserver.conf /etc/ \
+ && make installserver \
  && cd .. \
  && rm snapcast boost_${BOOST_VERSION_UNDERSCORED} -fR
+
+FROM ubuntu:bionic AS shairport
+
+RUN apt-get update && \
+    apt-get -y --no-install-recommends install \
+        build-essential \
+        git \
+        xmltoman \
+        autoconf \
+        automake \
+        libtool \
+        libpopt-dev \
+        libconfig-dev \
+        libasound2-dev \
+        avahi-daemon \
+        libavahi-client-dev \
+        libssl-dev \
+        libsoxr-dev && \
+    apt-get clean && rm -fR /var/lib/apt/lists
+
+RUN git clone https://github.com/mikebrady/shairport-sync.git && \
+    cd shairport-sync && \
+    autoreconf -fi && \
+    ./configure --with-stdout --with-avahi --with-ssl=openssl --with-metadata && \
+    make
 
 FROM ubuntu:bionic
 
 RUN apt-get update \
- && apt-get -y install curl libportaudio2 libvorbis0a libavahi-client3 libflac8 libvorbisenc2 libvorbisfile3 libopus0 libsoxr0 \
- && apt-get clean && rm -fR /var/lib/apt/lists
+    && apt-get -y install \
+        sox \
+        curl \
+        libportaudio2 \
+        libvorbis0a \
+        libconfig9 \
+        libpopt0 \
+        libavahi-client3 \
+        libflac8 \
+        libvorbisenc2 \
+        libvorbisfile3 \
+        libopus0 \
+        libsoxr0 \
+    && apt-get clean && rm -fR /var/lib/apt/lists
 
 COPY --from=librespot /usr/local/cargo/bin/librespot /usr/local/bin/
-COPY --from=snapcast /usr/local/bin/snapserver /usr/local/bin/
-COPY --from=snapcast /etc/snapserver.conf /etc/
+COPY --from=snapcast /usr/share/snapserver/ /usr/share/snapserver/
+COPY --from=snapcast /usr/bin/snapserver /usr/local/bin/
+COPY --from=shairport /shairport-sync/shairport-sync /usr/local/bin/
+
 
 COPY run.sh /
 CMD ["/run.sh"]
 
 ENV DEVICE_NAME=Snapcast
-EXPOSE 1704/tcp 1705/tcp
+EXPOSE 1704/tcp 1705/tcp 1780/tcp
+
